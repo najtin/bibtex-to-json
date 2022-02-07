@@ -1,0 +1,12 @@
+[package]
+name = "py-bibtex-parser"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+serde_json = "1.0.78"
+serde = {version = "1.0.136", features = ["derive"] }
+pyo3 = {version = "0.15.1", features = ["auto-initialize"]}
+num_cpus = "1.13.1"
