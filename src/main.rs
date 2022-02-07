@@ -1,24 +1,42 @@
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex, mpsc, mpsc::{Sender, Receiver}};
+use std::process::abort;
+use std::sync::{Arc, Mutex, mpsc, mpsc::{Sender}};
+use std::time::Duration;
 use serde_json;
 use serde::Serialize;
-use pyo3::prelude::*;
-use pyo3::types::IntoPyDict;
+use std::process::{Command, Stdio, ChildStdin, ChildStdout};
+use std::io::{Read, Write};
 fn main() {
     let args: Vec<String> = std::env::args().collect();
+    if args.len() != 3 {
+        println!("Usage: {} <source.bib> <output.json>", args[0]);
+        abort();
+    }
     let contents = leak_memory_of_string_into_static(std::fs::read_to_string(&args[1]).unwrap());
-    //automaton_for_reading("@article{test, a={1}, b = {2 }}")
     let results: Arc<Mutex<Vec<CompletedEntry>>> = Arc::new(Mutex::new(vec![]));
     let mut finalize_pool: Vec<Sender<Entry>> = vec![];
     let mut thread_handles = vec![];
+    //create the thread pool for parsing the actual entries 
     for _ in 0..num_cpus::get() {
         let (tx, rx) = mpsc::channel::<Entry>();
         let results_clone = results.clone();
         finalize_pool.push(tx);
         let handle = std::thread::spawn(move || {
+            //spawn a python process
+            let python_interpreter = Command::new("python3")
+                .args(vec!["-c", "from pylatexenc import latex2text\nimport json\ndecoder=latex2text.LatexNodes2Text().latex_to_text\nwhile(True):\n try:\n  text=input()\n except EOFError:\n  exit(0)\n res=decoder(text)\n print(json.dumps(res))"])
+                .stdin(Stdio::piped())
+                .stdout(Stdio::piped())
+                .spawn().unwrap();
+            let mut stdin = python_interpreter.stdin.unwrap();
+            let mut stdout = python_interpreter.stdout.unwrap();
             loop {
-                let entry = rx.recv().unwrap();
-                let completed_entry = entry.finalize(contents);
+                let entry = rx.recv();
+                if entry.is_err() {
+                    return;
+                }
+                let entry = entry.unwrap();
+                let completed_entry = entry.finalize(contents, &mut stdin, &mut stdout);
                 results_clone.lock().unwrap().push(completed_entry);
             }
         });
@@ -26,7 +44,7 @@ fn main() {
     }
     let num_entries = automaton_for_reading(&contents, &finalize_pool);
     while num_entries!=results.lock().unwrap().len() {
-        std::thread::sleep_ms(1000);
+        std::thread::sleep(Duration::from_secs(1));
     }
     let temp = results.lock().unwrap();
     let res: &Vec<CompletedEntry> = temp.as_ref();
@@ -71,21 +89,27 @@ impl Entry{
             fields: vec![]
         }
     }
-    fn finalize<'a>(self, input: &'a str) -> CompletedEntry<'a> {
+    fn finalize<'a>(self, input: &'a str, stdin: &mut ChildStdin, stdout: &mut ChildStdout) -> CompletedEntry<'a> {
         unsafe {
             let mut hm = HashMap::new();
             for field in self.fields {
                 let name = field.0.extract(input);
                 let mut value = field.1.extract(input);
                 if field.2 == true {
-                    let temp = Python::with_gil(|py| {
-                        //let sys = py.import("pylatexenc").unwrap();
-                        let locals = [("pylatexenc", py.import("pylatexenc").unwrap()), ("latex2text", py.import("pylatexenc.latex2text").unwrap())].into_py_dict(py);
-                        let code = format!("latex2text.LatexNodes2Text().latex_to_text({})", serde_json::to_string(value).unwrap());
-                        let decoded_value: String = py.eval(&code, None, Some(locals)).unwrap().extract().unwrap();
-                        return decoded_value;
-                    });
-                    value = leak_memory_of_string_into_static(temp);
+                    stdin.write(serde_json::to_string(value).unwrap().as_bytes()).unwrap();
+                    stdin.write(&[b'\n']).unwrap();
+                    let mut buffer = vec![0;2000];
+                    let mut decoded_value = "".to_string();
+                    loop {
+                        let bytes_read = stdout.read(&mut buffer).unwrap();
+                        decoded_value.push_str(&String::from_utf8(buffer[0..bytes_read].to_vec()).unwrap());
+                        if buffer[0..bytes_read].contains(&b'\n'){
+                            break;
+                        }
+                        
+                    }
+                    let decoded_value = serde_json::from_str(&decoded_value).unwrap();
+                    value = leak_memory_of_string_into_static(decoded_value);
                 } 
                 hm.insert(name, value);
             }
@@ -103,11 +127,6 @@ fn leak_memory_of_string_into_static(s: String) -> &'static str {
     Box::leak(s.into_boxed_str())
 }
 
-#[test]
-fn test(){
-    //automaton_for_reading(r"@article{test, a={1}, b = {2 }}".to_owned());
-}
-
 fn automaton_for_reading<'a>(input_string: &'a str, finalize_pool: &Vec<Sender<Entry>>) -> usize{
     type S = ParsingStates;
     let input: Vec<char> = input_string.chars().into_iter().collect();
@@ -116,7 +135,6 @@ fn automaton_for_reading<'a>(input_string: &'a str, finalize_pool: &Vec<Sender<E
     let mut current_field_name = Mark{start: 0, end_exclusice: 0};
     let mut current_field_value = Mark{start: 0, end_exclusice: 0};
     let mut open_brackets = 0;
-    //let mut completed_entries = vec![];
     let mut current_field_value_latex = false;
     let mut current_pool_node = 0;
     let mut num_of_entries = 0;
@@ -178,13 +196,11 @@ fn automaton_for_reading<'a>(input_string: &'a str, finalize_pool: &Vec<Sender<E
                 else if input[i]=='}' {
                     state = S::SeekEntry;
                     entry.original.end_exclusice = i+1;
-                    //println!("{:?}", entry.finalize(&input_string));
+                    //we want to use all cpu, thus we split the work for actually parsing accross the pool
                     finalize_pool[current_pool_node].send(entry).unwrap();
                     current_pool_node = (current_pool_node +1) % finalize_pool.len();
                     num_of_entries += 1;
-                    //completed_entries.push(entry.finalize(&input_string));
                     entry = Entry::new(0);
-                    //commit
                 }
             }
         }
@@ -205,10 +221,5 @@ enum ParsingStates{
     ReadFieldValue,
     ReadFieldValueEscape,
     DoneReadingFieldValue
-}
-
-enum SearchFirstEntry{
-    Seek,
-    Escape,
 }
 
