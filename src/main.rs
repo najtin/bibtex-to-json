@@ -24,7 +24,7 @@ fn main() {
         let handle = std::thread::spawn(move || {
             //spawn a python process
             let python_interpreter = Command::new("python3")
-                .args(vec!["-c", "from pylatexenc import latex2text\nimport json\ndecoder=latex2text.LatexNodes2Text().latex_to_text\nwhile(True):\n try:\n  text=input()\n except EOFError:\n  exit(0)\n res=decoder(text)\n print(json.dumps(res))"])
+                .args(vec!["-c", "from pylatexenc import latex2text\nimport json\ndecoder=latex2text.LatexNodes2Text().latex_to_text\nwhile(True):\n try:\n  text=input()\n except EOFError:\n  exit(0)\n text=json.loads(text)\n res=decoder(text)\n print(json.dumps(res))"])
                 .stdin(Stdio::piped())
                 .stdout(Stdio::piped())
                 .spawn().unwrap();
@@ -106,7 +106,6 @@ impl Entry{
                         if buffer[0..bytes_read].contains(&b'\n'){
                             break;
                         }
-                        
                     }
                     let decoded_value = serde_json::from_str(&decoded_value).unwrap();
                     value = leak_memory_of_string_into_static(decoded_value);
@@ -222,4 +221,3 @@ enum ParsingStates{
     ReadFieldValueEscape,
     DoneReadingFieldValue
 }
-
