@@ -22,4 +22,5 @@ make
 #Download a big example BibTeX file
 curl -o ir-anthology.bib https://raw.githubusercontent.com/ir-anthology/ir-anthology-data/master/ir-anthology.bib
 source .env/bin/activate && cargo run --release ir-anthology.bib ir-anthology.json 
+# takes about 12 seconds on a Ryzen 7 5800U 
 ```
