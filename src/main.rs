@@ -42,7 +42,7 @@ fn main() {
     }
     let num_entries = automaton_for_reading(&contents, &finalize_pool);
     while num_entries!=results.lock().unwrap().len() {
-        std::thread::sleep(Duration::from_secs(1));
+        std::thread::sleep(Duration::from_millis(100));
     }
     let temp = results.lock().unwrap();
     let res: &Vec<CompletedEntry> = temp.as_ref();
