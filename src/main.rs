@@ -15,13 +15,12 @@ fn main() {
     let contents = leak_memory_of_string_into_static(std::fs::read_to_string(&args[1]).unwrap());
     let results: Arc<Mutex<Vec<CompletedEntry>>> = Arc::new(Mutex::new(vec![]));
     let mut finalize_pool: Vec<Sender<Entry>> = vec![];
-    let mut thread_handles = vec![];
     //create the thread pool for parsing the actual entries 
     for _ in 0..num_cpus::get() {
         let (tx, rx) = mpsc::channel::<Entry>();
         let results_clone = results.clone();
         finalize_pool.push(tx);
-        let handle = std::thread::spawn(move || {
+        std::thread::spawn(move || {
             //spawn a python process
             let python_interpreter = Command::new("python3")
                 .args(vec!["-c", "from pylatexenc import latex2text\nimport json\ndecoder=latex2text.LatexNodes2Text().latex_to_text\nwhile(True):\n try:\n  text=input()\n except EOFError:\n  exit(0)\n text=json.loads(text)\n res=decoder(text)\n print(json.dumps(res))"])
@@ -40,7 +39,6 @@ fn main() {
                 results_clone.lock().unwrap().push(completed_entry);
             }
         });
-        thread_handles.push(handle);
     }
     let num_entries = automaton_for_reading(&contents, &finalize_pool);
     while num_entries!=results.lock().unwrap().len() {
