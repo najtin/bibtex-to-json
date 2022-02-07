@@ -163,6 +163,9 @@ fn automaton_for_reading<'a>(input_string: &'a str, finalize_pool: &Vec<Sender<E
             }
             S::ReadFieldValue => {
                 match input[i] {
+                    '$' => {
+                        current_field_value_latex = true;
+                    }
                     '{' => {
                         open_brackets += 1;
                         current_field_value_latex = true;
