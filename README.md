@@ -8,6 +8,11 @@ The program has two parts:
 - 2) Parsing elements with the help of the marked position
 
 The second part is done in parallel and uses all available threads. If a field in a bibtex entry contains latex code, then the content of the field is passed to [pylatexenc](https://github.com/phfaist/pylatexenc) (a latex interpreter for python). Thanks to  Philippe Faist for this awesome python library. Each thread has its own instance of the python interpreter so that they do not block each other through the gil.
+### Prerequirements:
+- python3 and pip3
+- make
+- [Cargo](https://www.rust-lang.org/tools/install) 
+
 ### How to compile:
 ```bash
 make
