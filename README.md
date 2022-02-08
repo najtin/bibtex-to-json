@@ -19,8 +19,29 @@ make
 ```
 ### How to run with example:
 ```bash
+#run a small example
+source .env/bin/activate && cargo run --release examples/single.bib single.json 
+
 #Download a big example BibTeX file
 curl -o ir-anthology.bib https://raw.githubusercontent.com/ir-anthology/ir-anthology-data/master/ir-anthology.bib
 source .env/bin/activate && cargo run --release ir-anthology.bib ir-anthology.json 
 # takes about 10 seconds on a Ryzen 7 5800U 
+```
+
+### Output structure
+The json is an array of dictionaries. Here is an example structure:
+```json
+[
+  {
+    "bibkey": "this string contains the bibkey of the bibtex entry e.g. conf/ecit/Meier2000",
+    "entry_type": "this string contains the typ eof the bibtex entry e.g. article or proceedings",
+    "original": "the original string of this entry from the parsed bibtex file",
+    "fields" : {
+      "author" : "the fields dictionary contains all fields, e.g. the author field, a value here could be Max Mustermann",
+      "editor" : "here are some more example fields",
+      "year" : "2022",
+      "pages" : "1--23"
+    }
+  }
+]
 ```
