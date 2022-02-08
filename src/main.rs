@@ -46,7 +46,7 @@ fn main() {
     }
     let temp = results.lock().unwrap();
     let res: &Vec<CompletedEntry> = temp.as_ref();
-    std::fs::write(&args[2], serde_json::to_string(res).unwrap()).unwrap();
+    std::fs::write(&args[2], serde_json::to_string_pretty(res).unwrap()).unwrap();
 }
 
 #[derive(Debug)]
