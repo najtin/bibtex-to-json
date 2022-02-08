@@ -66,7 +66,7 @@ struct Entry{
     pub original: Mark,
     pub entry_type: Mark, 
     pub bibkey: Mark, 
-    pub fields: Vec<(Mark, Mark, bool)>
+    pub fields: Vec<(Mark, Mark, bool, bool)>
 }
 
 
@@ -92,22 +92,44 @@ impl Entry{
             let mut hm = HashMap::new();
             for field in self.fields {
                 let name = field.0.extract(input);
-                let mut value = field.1.extract(input);
-                if field.2 == true {
-                    stdin.write(serde_json::to_string(value).unwrap().as_bytes()).unwrap();
-                    stdin.write(&[b'\n']).unwrap();
-                    let mut buffer = vec![0;2000];
-                    let mut decoded_value = "".to_string();
-                    loop {
-                        let bytes_read = stdout.read(&mut buffer).unwrap();
-                        decoded_value.push_str(&String::from_utf8(buffer[0..bytes_read].to_vec()).unwrap());
-                        if buffer[0..bytes_read].contains(&b'\n'){
-                            break;
+                let unchanged_value = field.1.extract(input);
+                let trim = field.3;
+                let latex = field.2;
+                let mut closure = ||{
+                    let mut value = unchanged_value.to_string();
+                    if trim {
+                        let mut buffer = "".to_string();
+                        let mut last_was_whitespace = true;
+                        for c in value.chars() {
+                            match c {
+                                '\n' | ' ' | '\r' | '\t' =>  {
+                                    if !last_was_whitespace {
+                                        buffer.push(' ');
+                                        last_was_whitespace = true;
+                                    }
+                                }
+                                _ => {buffer.push(c); last_was_whitespace = false;}
+                            };
                         }
+                        value = buffer;
                     }
-                    let decoded_value = serde_json::from_str(&decoded_value).unwrap();
-                    value = leak_memory_of_string_into_static(decoded_value);
-                } 
+                    if latex {
+                        stdin.write(serde_json::to_string(&value).unwrap().as_bytes()).unwrap();
+                        stdin.write(&[b'\n']).unwrap();
+                        let mut buffer = vec![0;2000];
+                        let mut decoded_value = "".to_string();
+                        loop {
+                            let bytes_read = stdout.read(&mut buffer).unwrap();
+                            decoded_value.push_str(&String::from_utf8(buffer[0..bytes_read].to_vec()).unwrap());
+                            if buffer[0..bytes_read].contains(&b'\n'){
+                                break;
+                            }
+                        }
+                        value = serde_json::from_str(&decoded_value).unwrap();
+                    } 
+                    return leak_memory_of_string_into_static(value);
+                };
+                let value: &str = if trim | latex {closure()} else {unchanged_value};
                 hm.insert(name, value);
             }
             CompletedEntry{
@@ -133,6 +155,7 @@ fn automaton_for_reading<'a>(input_string: &'a str, finalize_pool: &Vec<Sender<E
     let mut current_field_value = Mark{start: 0, end_exclusice: 0};
     let mut open_brackets = 0;
     let mut current_field_value_latex = false;
+    let mut current_field_value_trim = false;
     let mut current_pool_node = 0;
     let mut num_of_entries = 0;
     for i in 0..input.len() {
@@ -157,9 +180,10 @@ fn automaton_for_reading<'a>(input_string: &'a str, finalize_pool: &Vec<Sender<E
                 if input[i]=='=' {state = S::SeekFieldValueBracket;}
             }
             S::SeekFieldValueBracket => {
-                if input[i] == '{' {state = S::ReadFieldValue; current_field_value.start=i+1;}
+                if input[i] == '{' {state = S::ReadFieldValue(input[i]); current_field_value.start=i+1;}
             }
-            S::ReadFieldValue => {
+            S::ReadFieldValue( pred) => {
+                state = S::ReadFieldValue(input[i]);
                 match input[i] {
                     '$' => {
                         current_field_value_latex = true;
@@ -175,21 +199,26 @@ fn automaton_for_reading<'a>(input_string: &'a str, finalize_pool: &Vec<Sender<E
                         else if open_brackets==0 {
                             state = S::DoneReadingFieldValue; 
                             current_field_value.end_exclusice=i;
-                            entry.fields.push((current_field_name, current_field_value, current_field_value_latex));
+                            entry.fields.push((current_field_name, current_field_value, current_field_value_latex, current_field_value_trim));
                             current_field_name = Mark{start: 0, end_exclusice: 0};
                             current_field_value = Mark{start: 0, end_exclusice: 0};
                             current_field_value_latex = false;
+                            current_field_value_trim = false;
                         }
                     }
                     '\\' => {
                         state = S::ReadFieldValueEscape;
                         current_field_value_latex = true;
                     }
-                    _ => {}
+                    _ => {
+                        if (input[i].is_whitespace() | (input[i]=='\n')) & (pred.is_whitespace() | (pred=='\n')) {
+                            current_field_value_trim = true;
+                        }
+                    }
                 }
             }
             S::ReadFieldValueEscape => {
-                state = S::ReadFieldValue;
+                state = S::ReadFieldValue(input[i]);
             }
             S::DoneReadingFieldValue => {
                 if input[i]==',' {state = S::SeekFieldName;}
@@ -218,7 +247,7 @@ enum ParsingStates{
     ReadFieldName,
     SeekEqualsSign,
     SeekFieldValueBracket,
-    ReadFieldValue,
+    ReadFieldValue(char),
     ReadFieldValueEscape,
     DoneReadingFieldValue
 }
